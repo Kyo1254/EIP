@@ -6,3 +6,4 @@
 #include <shellapi.h>
 #include <locale>
 #include <codecvt>
+#include <tchar.h>

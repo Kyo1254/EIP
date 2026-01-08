@@ -396,6 +396,99 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
                 SRCCOPY
             );
 
+			const double PIXEL_DISPLAY_THRESHOLD = 8.0;
+
+            if (g_scaleFactor >= PIXEL_DISPLAY_THRESHOLD)
+            {
+				SetBkMode(hMemDC, TRANSPARENT);
+
+                int imgW = g_currentImage.cols;
+				int imgH = g_currentImage.rows;
+				int channels = g_currentImage.channels();
+
+				const TCHAR* text = _T("255\n255\n255");
+
+                int requiredMinSize = 40;
+
+                // Grid 선을 그리기 위한 Pen 설정
+				HPEN hGridPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+				HPEN hOldPen = (HPEN)SelectObject(hMemDC, hGridPen);
+
+                for (int y = 0; y < imgH; y++)
+                {
+                    for (int x = 0; x < imgW; x++)
+                    {
+						int screenX = g_offsetX + (int)(x * g_scaleFactor);
+						int screenY = g_offsetY + (int)(y * g_scaleFactor);
+                        int scaledSize = (int)g_scaleFactor;
+
+                        if (screenX + scaledSize > 0 && screenY + scaledSize > 0 &&
+                            screenX < winWidth && screenY < winHeight && scaledSize >= requiredMinSize)
+                        {
+							// Pixel Grid 선 그리기
+							HBRUSH hOldBrush = (HBRUSH)SelectObject(hMemDC, GetStockObject(NULL_BRUSH));
+							Rectangle(hMemDC, screenX, screenY, screenX + scaledSize, screenY + scaledSize);
+							SelectObject(hMemDC, hOldBrush);
+
+                            if(scaledSize >= requiredMinSize)
+                            {
+                                if (channels == 3)
+                                {
+                                    cv::Vec3b pixel = g_currentImage.at<cv::Vec3b>(y, x);
+                                    int b = pixel[0];
+                                    int g = pixel[1];
+                                    int r = pixel[2];
+
+                                    // R, G, B 채널 데이터 정의
+                                    struct ChannelData { int value; COLORREF color; const TCHAR* label; };
+                                    ChannelData channelsData[] = {
+                                        { r, RGB(255, 0, 0), _T("R") }, // R: 빨간색
+                                        { g, RGB(0, 255, 0), _T("G") }, // G: 초록색
+                                        { b, RGB(0, 0, 255), _T("B") }  // B: 파란색
+                                    };
+
+                                    // 픽셀 블록 내에서 각 값을 표시할 공간 계산 (3등분)
+                                    int lineHeight = scaledSize / 3;
+
+                                    // R, G, B 세 줄을 순회하며 출력
+                                    for (int i = 0; i < 3; ++i)
+                                    {
+                                        TCHAR text[16];
+                                        // "R:255"와 같은 포맷으로 출력
+                                        _stprintf_s(text, 16, _T("%d"), channelsData[i].value);
+
+                                        int currentY = screenY + i * lineHeight;
+
+                                        // ⭐ B. 채널별 고유 색상 설정 ⭐
+                                        SetTextColor(hMemDC, channelsData[i].color);
+
+                                        RECT textRect = { screenX, currentY, screenX + scaledSize, currentY + lineHeight };
+                                        DrawText(hMemDC, text, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                    }
+                                }
+                                else if (channels == 1) // GRAYSCALE (1채널) 이미지
+                                {
+                                    uchar gray = g_currentImage.at<uchar>(y, x);
+
+                                    TCHAR grayText[16];
+                                    _stprintf_s(grayText, 16, _T("G:%d"), gray); // "G:255" 포맷으로 출력
+
+                                    // 1채널은 대비 색상 유지 (회색이므로 흰색/검은색이 가장 잘 보임)
+                                    COLORREF contrastColor = (gray > 128) ? RGB(0, 0, 0) : RGB(255, 255, 255);
+                                    SetTextColor(hMemDC, contrastColor);
+
+                                    // 픽셀 블록 중앙에 출력
+                                    RECT textRect = { screenX, screenY, screenX + scaledSize, screenY + scaledSize };
+                                    DrawText(hMemDC, grayText, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                }
+                            }
+                        }
+                    }
+                }
+				SelectObject(hMemDC, hOldPen);
+				DeleteObject(hGridPen);
+            }
+
 			// 4. 메모리 DC의 내용을 화면 HDC로 복사
 			BitBlt(hdc, 0, 0, winWidth, winHeight, hMemDC, 0, 0, SRCCOPY);
 
