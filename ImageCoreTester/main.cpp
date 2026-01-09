@@ -71,7 +71,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	if (hImageCoreDLL == NULL)
 	{
-		MessageBox(NULL, _T("ImageCore.dll을 로드할 수 없습니다."), _T("Error"), MB_OK | MB_ICONERROR);
+		DWORD dwError = GetLastError();
+		TCHAR szError[256];
+		_stprintf_s(szError, 256, _T("LoadLibrary 실패 (ImageCore.dll). 오류 코드: %d"), dwError);
+		MessageBox(NULL, szError, _T("DLL 로드 오류"), MB_OK | MB_ICONERROR);
+
 		return 1;
 	}
 
@@ -142,7 +146,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		// 이미지 로드 테스트
 		if (pLoadImageW)
 		{
-			pLoadImageW(_T("E:\\Dev\\EIP\\x64\\Debug\\Image.bmp"));
+			pLoadImageW(_T("C:\\Dev\\Image\\osaka.jpg"));
 		}
 
 		// 메시지 루프 실행
