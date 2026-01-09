@@ -36,6 +36,8 @@ struct BitmapInfo
     RGBQUAD palette[256];
 };
 
+
+
 void CreateImagePyramids(cv::Mat source)
 {
 	g_pyramids.clear();
@@ -163,22 +165,37 @@ void FitImageToWindow(HWND hWnd)
 	RequestViewerRedraw();
 }
 
-// 리스트의 특정 인덱스에 있는 이미지를 로드하는 내부 헬퍼 함수
-bool LoadImageByIndex(int index)
+bool ProcessLoadedImage(cv::Mat loadedImg)
 {
-    if (index < 0 || index >= g_fileList.size())
+    if (loadedImg.empty())
         return false;
 
-    g_currentIndex = index;
+    g_currentImage = loadedImg.clone();
 
-    const wchar_t* widePath = g_fileList[g_currentIndex].c_str();
+    g_scaleFactor = 1.0;
+    CreateImagePyramids(g_currentImage);
 
-    std::string utf8Path = ConvertWStringToStringUTF8(widePath);
+    g_displayImage = g_currentImage.clone();
 
-	int bitDepth = GetBitDepthFromFile(utf8Path);
+    if (g_hWndViewer)
+    {
+        RECT rect;
+        GetClientRect(g_hWndViewer, &rect);
+        int width = rect.right - rect.left;
+        int height = rect.bottom - rect.top;
 
+        // CalculateFitParams 호출 후 FitImageToWindow 호출 가정
+        CalculateFitParams(width, height);
+        FitImageToWindow(g_hWndViewer);
+    }
+    RequestViewerRedraw();
+    return true;
+}
+
+cv::Mat LoadImageByPath(const std::string& utf8Path)
+{
+    int bitDepth = GetBitDepthFromFile(utf8Path);
     cv::Mat loadedImg;
-
     if (bitDepth == 8)
     {
         loadedImg = cv::imread(utf8Path, cv::IMREAD_GRAYSCALE);
@@ -191,31 +208,22 @@ bool LoadImageByIndex(int index)
     {
         loadedImg = cv::imread(utf8Path, cv::IMREAD_UNCHANGED);
     }
+    return loadedImg;
+}
 
-    if (loadedImg.empty())
+// 리스트의 특정 인덱스에 있는 이미지를 로드하는 내부 헬퍼 함수
+bool LoadImageByIndex(int index)
+{
+    if (index < 0 || index >= g_fileList.size())
         return false;
 
-    g_currentImage = loadedImg.clone();
+    g_currentIndex = index;
+    const wchar_t* widePath = g_fileList[g_currentIndex].c_str();
+    std::string utf8Path = ConvertWStringToStringUTF8(widePath);
 
-    if (g_currentImage.empty())
-        return false;
-
-	g_scaleFactor = 1.0;    
-	CreateImagePyramids(g_currentImage);
-
-    g_displayImage = g_currentImage.clone();
-
-    if (g_hWndViewer)
-    {
-        RECT rect;
-		GetClientRect(g_hWndViewer, &rect);
-		CalculateFitParams(rect.right - rect.left, rect.bottom - rect.top);
-
-        FitImageToWindow(g_hWndViewer);
-    }
-
-	RequestViewerRedraw();
-    return true;
+	cv::Mat loadedImg = LoadImageByPath(utf8Path);
+	
+    return ProcessLoadedImage(loadedImg);
 }
 
 IMAGECORE_API void ZoomIn(float zoomStep)
@@ -790,50 +798,9 @@ IMAGECORE_API bool LoadImageFileW(const wchar_t* filePath)
     std::wstring wPath(filePath);
 	std::string utf8Path = ConvertWStringToStringUTF8(wPath);
 
-    int bitDepth = GetBitDepthFromFile(utf8Path);
-
-    cv::Mat loadedImg;
-
-    if (bitDepth == 8)
-    {
-		loadedImg = cv::imread(utf8Path, cv::IMREAD_GRAYSCALE);
-    }
-    else if (bitDepth == 24)
-    {
-        loadedImg = cv::imread(utf8Path, cv::IMREAD_COLOR);
-    }
-    else
-    {
-		loadedImg = cv::imread(utf8Path, cv::IMREAD_UNCHANGED);
-	}
-
-    if (loadedImg.empty())
-		return false;
-
-    g_currentImage = loadedImg.clone();
-
-    if (g_currentImage.empty())
-		return false;
-    
-    g_scaleFactor = 1.0;
-    CreateImagePyramids(g_currentImage);
-
-    g_displayImage = g_currentImage.clone();
-
-    if (g_hWndViewer)
-    {
-        RECT rect;
-		GetClientRect(g_hWndViewer, &rect);
-		int width = rect.right - rect.left;
-		int height = rect.bottom - rect.top;    
-
-		CalculateFitParams(width, height);
-
-        FitImageToWindow(g_hWndViewer);
-    }
+	cv::Mat loadedImg = LoadImageByPath(utf8Path);
 	
-    RequestViewerRedraw();
-    return true;    
+    return ProcessLoadedImage(loadedImg);    
 }
 
 // ---------------------------------------------------------------
