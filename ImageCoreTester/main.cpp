@@ -7,7 +7,7 @@
 typedef HWND(*CREATE_VIEWER_FUNC)(HWND);
 typedef HWND(*GET_HANDLE_FUNC)();
 typedef void (*INIT_CORE_FUNC)();
-typedef bool (*LOAD_IMAGE_FUNC)(const wchar_t*);
+typedef bool (*LOAD_IMAGE_FUNC)(const std::string&);
 typedef void (*REQUEST_REDRAW_FUNC)();
 typedef void (*SET_POS_FUNC)(int, int, int, int);
 
@@ -83,7 +83,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	// 함수 포인터 획득
 	INIT_CORE_FUNC pInitialize = (INIT_CORE_FUNC)GetProcAddress(hImageCoreDLL, "InitializeImageCore");
 	CREATE_VIEWER_FUNC pCreateViewer = (CREATE_VIEWER_FUNC)GetProcAddress(hImageCoreDLL, "CreateImageViewer");
-	LOAD_IMAGE_FUNC pLoadImageW = (LOAD_IMAGE_FUNC)GetProcAddress(hImageCoreDLL, "LoadImageFileW");
+	LOAD_IMAGE_FUNC pLoadImage = (LOAD_IMAGE_FUNC)GetProcAddress(hImageCoreDLL, "LoadImageFile");
 
 	ZOOM_IN_FUNC pZoomIn = (ZOOM_IN_FUNC)GetProcAddress(hImageCoreDLL, "ZoomIn");
 	ZOOM_OUT_FUNC pZoomOut = (ZOOM_OUT_FUNC)GetProcAddress(hImageCoreDLL, "ZoomOut");
@@ -119,12 +119,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	if(!RegisterClassEx(&wc))
 	{
-		MessageBox(NULL, _T("테스트 부모 창 클래스를 등록할 수 없습니다."), _T("Error"), MB_OK | MB_ICONERROR);
+		MessageBoxW(NULL, _T("테스트 부모 창 클래스를 등록할 수 없습니다."), _T("Error"), MB_OK | MB_ICONERROR);
 		FreeLibrary(hImageCoreDLL);
 		return 1;
 	}
 
-	HWND hTestParent = CreateWindowEx(
+	HWND hTestParent = CreateWindowExW(
 		0, TEST_WINDOW_CLASS, _T("Test Parent Window"), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
 		100, 100, 800, 600, NULL, NULL, hInstance, NULL);
 
@@ -144,9 +144,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		}
 
 		// 이미지 로드 테스트
-		if (pLoadImageW)
+		if (pLoadImage)
 		{
-			pLoadImageW(_T("C:\\Dev\\Image\\osaka.jpg"));
+			std::string sampleImagePath = std::filesystem::current_path().parent_path().string() 
+				+ "\\Image\\osaka.jpg";
+			
+			pLoadImage(sampleImagePath);
 		}
 
 		// 메시지 루프 실행

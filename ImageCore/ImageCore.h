@@ -1,6 +1,8 @@
 #pragma once
 
-//#include "pch.h"
+#pragma unmanaged
+
+#include "pch.h"
 
 #ifdef IMAGECORE_EXPORTS
 #define IMAGECORE_API __declspec(dllexport)
@@ -25,7 +27,7 @@ extern "C" {
 	IMAGECORE_API void SetViewerPosition(int x, int y, int width, int height);
 
 	// 이미지 로드 함수
-	IMAGECORE_API bool LoadImageFileW(const wchar_t* filePath);
+	IMAGECORE_API bool LoadImageFile(const std::string& filePath);
 
 	// 뷰어 컨트롤 함수
 	IMAGECORE_API void RequestViewerRedraw();
@@ -35,3 +37,5 @@ extern "C" {
 	IMAGECORE_API void ZoomOut(float zoomStep);
 	IMAGECORE_API void ResetZoom();
 }
+
+#pragma managed

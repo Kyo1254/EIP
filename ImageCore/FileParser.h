@@ -40,5 +40,11 @@ struct TiffIFDEntry {
 // 포맷별 파싱 함수
 int ParseBmpHeader(std::ifstream& file);
 int ParseTiffHeader(std::ifstream& file);
+int ParseJpegHeader(std::ifstream& file);
 
 int GetBitDepthFromFile(const std::string& filePath);
+
+inline unsigned short SwapBytes(unsigned short val)
+{
+	return (val >> 8) | (val << 8);
+}

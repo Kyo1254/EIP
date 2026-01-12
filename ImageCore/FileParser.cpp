@@ -53,6 +53,65 @@ int ParseTiffHeader(std::ifstream& file)
 	return 0;
 }
 
+int ParseJpegHeader(std::ifstream& file)
+{
+	file.seekg(2, std::ios::beg);
+
+	unsigned short marker = 0;
+	while (!file.eof())
+	{
+		if (!file.read((char*)&marker, sizeof(marker)))break;
+
+		marker = SwapBytes(marker);
+
+		if ((marker & 0xFF00) != 0xFF00)
+		{
+			file.seekg(-1, std::ios::cur);
+			continue;
+		}
+
+		if (marker >= 0xFFC0 && marker <= 0xFFCF &&
+			marker != 0xFFC4 && marker != 0xFFC8 && marker != 0xFFCC)
+		{
+			unsigned short length = 0;
+			if (!file.read((char*)&length, sizeof(length))) return 24;
+
+			length = SwapBytes(length);
+
+			unsigned char precision = 0;
+			unsigned short height = 0;
+			unsigned short width = 0;
+			unsigned char numComponents = 0;
+
+			if (!file.read((char*)&precision, sizeof(precision))) return 24;
+
+			if (!file.read((char*)&height, sizeof(height))) return 24;
+			if (!file.read((char*)&width, sizeof(width))) return 24;
+			if (!file.read((char*)&numComponents, sizeof(numComponents))) return 24;
+
+			return (int)precision * (int)numComponents;
+		}
+		else
+		{
+			unsigned short length = 0;
+			if (!file.read((char*)&length, sizeof(length))) break;
+
+			length = SwapBytes(length);
+
+			if (length > 2)
+			{
+				file.seekg(length - 2, std::ios::cur);
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+
+	return 24;
+}
+
 int GetBitDepthFromFile(const std::string& filePath)
 {
 	std::ifstream file(filePath, std::ios::binary);
@@ -71,7 +130,7 @@ int GetBitDepthFromFile(const std::string& filePath)
 	}
 	else if (ext == "jpg" || ext == "jpeg")
 	{
-		bitDepth = 24;
+		bitDepth = ParseJpegHeader(file);
 	}
 
 	file.close();

@@ -5,15 +5,17 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ImageCoreTester_WPF"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="MainWindow" Height="450" Width="800"
+        Loaded="Window_Loaded" Closing="Window_Closing">
     <Grid>
-        <Border BorderBrush="Gray" BorderThickness="1" 
+        <!--<Border BorderBrush="Gray" BorderThickness="1" 
                 x:Name="HostBorder" 
                 MouseDown="HostBorder_MouseDown" 
                 Drop="HostBorder_Drop" AllowDrop="True">
 
             <WindowsFormsHost x:Name="HostControl" />
 
-        </Border>
+        </Border>-->
+        <WindowsFormsHost x:Name="ViewerHost" Loaded="ViewerHost_Loaded"/>
     </Grid>
 </Window>

@@ -1,18 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.IO;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using System.Windows.Forms;
 using System.Windows.Forms.Integration;
+using ImageCoreWrapper;
 
 namespace ImageCoreTester_WPF
 {
@@ -21,54 +12,92 @@ namespace ImageCoreTester_WPF
     /// </summary>
     public partial class MainWindow : Window
     {
-        private IntPtr _viewerHwnd = IntPtr.Zero;
-        private readonly System.Windows.Forms.Panel _hostPanel = new System.Windows.Forms.Panel();
+        private ImageCoreWrapper.ImageCore _imageCore;
+
         public MainWindow()
         {
             InitializeComponent();
-            this.Loaded += MainWindow_Loaded;
         }
 
-        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // 1. WindowsFormsHost를 사용하여 WinForms Panel을 통합
-            HostControl.Child = _hostPanel;
-
-            // 2. Panel의 핸들을 가져옴 (이것이 DLL이 필요로 하는 HWND입니다)
-            _viewerHwnd = _hostPanel.Handle;
-
-            // 3. DLL 초기화 호출
-            int width = (int)HostBorder.ActualWidth;
-            int height = (int)HostBorder.ActualHeight;
-
-            // C++ DLL의 InitializeViewer 함수를 호출하여 HWND 전달
-            ImageCoreWrapper.CreateImageViewer(_viewerHwnd, width, height);
+            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            // C++ core Initialize
+            ImageCore.Initialize();
+            _imageCore = new ImageCore();
         }
 
-        private void HostBorder_Drop(object sender, DragEventArgs e)
+        private void ViewerHost_Loaded(object sender, RoutedEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            WindowsFormsHost host = (WindowsFormsHost)sender;
+
+            // WinForms Panel을 호스트하여 부모 HWND 확보
+            Panel winFormsPanel = new Panel();
+            winFormsPanel.Width = 800;
+            winFormsPanel.Height = 600;
+            host.Child = winFormsPanel;
+
+            IntPtr hParent = winFormsPanel.Handle;
+
+            if (_imageCore != null)
             {
-                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                if (files.Length > 0)
+                IntPtr hViewer = _imageCore.CreateViewer(hParent);
+
+                if (hViewer != IntPtr.Zero)
                 {
-                    string filePath = files[0];
+                    _imageCore.SetViewerPos(0, 0, (int)winFormsPanel.Width, (int)winFormsPanel.Height);
 
-                    // ⭐ 파일 속성(Bit Depth) 확인 로직 (테스터 프로젝트에서 수행)
-                    int bitDepth = FilePropertyReader.GetImageBitDepth(filePath);
+                    string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                    string projectRoot = Path.GetFullPath(Path.Combine(appDirectory, @"..\..\..\..")); // 3단계 위로 가정
+                    string sampleImagePath = Path.Combine(projectRoot, "Image", "osaka.jpg");
 
-                    // 4. 이미지 로드 호출
-                    ImageCoreWrapper.LoadImageFileW(filePath, bitDepth);
-
-                    // (LoadImageFileW 내부에서 RequestViewerRedraw를 호출하는 경우 필요 없음)
-                    // ImageCoreWrapper.RequestViewerRedraw(); 
+                    if (File.Exists(sampleImagePath))
+                    {
+                        bool success = _imageCore.LoadImgFile(sampleImagePath);
+                        if (success)
+                        {
+                            _imageCore.RequestRedraw();
+                        }   
+                    }
+                    else
+                    {
+                        System.Windows.MessageBox.Show("샘플 이미지 파일을 찾을 수 없습니다: " + sampleImagePath);
+                    }
                 }
+            }
+
+        }
+
+        private void ZoomIn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_imageCore != null)
+            {
+                _imageCore.ViewerZoomIn(0.1f);
+                _imageCore.RequestRedraw();
             }
         }
 
-        private void HostBorder_MouseDown(object sender, MouseButtonEventArgs e)
+        private void ZoomOut_Click(object sender, RoutedEventArgs e)
         {
+            if (_imageCore != null)
+            {
+                _imageCore.ViewerZoomOut(0.1f);
+                _imageCore.RequestRedraw();
+            }
+        }
 
+        private void ResetZoom_Click(object sender, EventArgs e)
+        {
+            if (_imageCore != null)
+            {
+                _imageCore.ViewerResetZoom();
+                _imageCore.RequestRedraw();
+            }
+        }
+
+        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            ImageCore.Terminate();
         }
     }
 }

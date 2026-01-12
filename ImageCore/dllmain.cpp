@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "ImageCore.h"
 #include "FileParser.h"
+#include <filesystem>
 
 // 전역, 정적 변수
 HWND g_hWndViewer = NULL;
@@ -793,12 +794,12 @@ IMAGECORE_API void SetViewerPosition(int x, int y, int width, int height)
     
 }
 
-IMAGECORE_API bool LoadImageFileW(const wchar_t* filePath)
+IMAGECORE_API bool LoadImageFile(const std::string& filePath)
 {
-    std::wstring wPath(filePath);
-	std::string utf8Path = ConvertWStringToStringUTF8(wPath);
+    // std::wstring wPath(filePath);
+	// std::string utf8Path = ConvertWStringToStringUTF8(wPath);
 
-	cv::Mat loadedImg = LoadImageByPath(utf8Path);
+	cv::Mat loadedImg = LoadImageByPath(filePath);
 	
     return ProcessLoadedImage(loadedImg);    
 }
