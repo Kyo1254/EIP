@@ -1,166 +1,60 @@
 #include <windows.h>
-#include <iostream>
 #include <tchar.h>
-#include <stdio.h>
+#include <string>
 #include <filesystem>
 
+// DLL 함수 포인터 정의
 typedef HWND(*CREATE_VIEWER_FUNC)(HWND);
-typedef HWND(*GET_HANDLE_FUNC)();
-typedef void (*INIT_CORE_FUNC)();
 typedef bool (*LOAD_IMAGE_FUNC)(const std::string&);
-typedef void (*REQUEST_REDRAW_FUNC)();
-typedef void (*SET_POS_FUNC)(int, int, int, int);
-
-typedef HWND(*GET_VIEWER_HANDLE_FUNC)();
-
-typedef void (*ZOOM_IN_FUNC)(float);
-typedef void (*ZOOM_OUT_FUNC)(float);
-typedef void (*RESET_ZOOM_FUNC)();
-
-ZOOM_IN_FUNC g_pZoomIn = NULL;
-ZOOM_OUT_FUNC g_pZoomOut = NULL;
-RESET_ZOOM_FUNC g_pResetZoom = NULL;
-
-GET_VIEWER_HANDLE_FUNC pGetViewerHandle = NULL;
 
 LRESULT CALLBACK TestParentWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	switch (message)
-	{
-	case WM_KEYDOWN:
-	{
-		if (pGetViewerHandle)
-		{
-			HWND hViewer = pGetViewerHandle();
-			if (hViewer)
-			{
-				PostMessage(hViewer, message, wParam, lParam);
-			}
-		}
-		return 0;
-	}
-	case WM_SIZE:
-	{
-		int width = LOWORD(lParam);
-		int height = HIWORD(lParam);
-
-		HWND hViewer = pGetViewerHandle();
-		if (hViewer)
-		{
-			MoveWindow(hViewer, 0, 0, width, height, TRUE);
-		}
-		return 0;
-	}
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
-	return DefWindowProc(hWnd, message, wParam, lParam);
+    // 모든 처리는 DLL의 서브클래싱 함수에서 수행되므로 기본 처리만 남깁니다.
+    return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-	_In_opt_ HINSTANCE hPrevInstance,
-	_In_ LPWSTR    lpCmdLine,
-	_In_ int       nCmdShow)
+int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
-	std::filesystem::path currentPath = std::filesystem::current_path();
+    // 1. DLL 로드
+    HMODULE hDLL = LoadLibrary(_T("ImageCore.dll"));
+    if (!hDLL) return 1;
 
-	
-	// DLL 로드
-	HMODULE hImageCoreDLL = LoadLibrary(_T("ImageCore.dll"));
+    auto pCreateViewer = (CREATE_VIEWER_FUNC)GetProcAddress(hDLL, "CreateImageViewer");
+    auto pLoadImage = (LOAD_IMAGE_FUNC)GetProcAddress(hDLL, "LoadImageFile");
 
-	if (hImageCoreDLL == NULL)
-	{
-		DWORD dwError = GetLastError();
-		TCHAR szError[256];
-		_stprintf_s(szError, 256, _T("LoadLibrary 실패 (ImageCore.dll). 오류 코드: %d"), dwError);
-		MessageBox(NULL, szError, _T("DLL 로드 오류"), MB_OK | MB_ICONERROR);
+    // 2. 부모 창 클래스 등록 (최소한의 설정)
+    const TCHAR* CLASS_NAME = _T("EIP");
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = DefWindowProc; // 모든 처리는 DLL 서브클래싱이 담당
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = CLASS_NAME;
+    RegisterClass(&wc);
 
-		return 1;
-	}
+    // 3. 창 생성 (초기 위치와 크기만 지정)
+    HWND hParent = CreateWindowEx(0, CLASS_NAME, _T("EIP Viewer"),
+        WS_POPUP | WS_VISIBLE, // 스타일은 DLL 내부에서 WS_THICKFRAME 등으로 자동 재설정됨
+        100, 100, 1024, 768, NULL, NULL, hInstance, NULL);
 
+    // 4. DLL에 부모 핸들 전달 -> 여기서부터 DLL이 모든 UI를 제어함 ?
+    if (pCreateViewer) {
+        pCreateViewer(hParent);
+    }
 
-	// 함수 포인터 획득
-	INIT_CORE_FUNC pInitialize = (INIT_CORE_FUNC)GetProcAddress(hImageCoreDLL, "InitializeImageCore");
-	CREATE_VIEWER_FUNC pCreateViewer = (CREATE_VIEWER_FUNC)GetProcAddress(hImageCoreDLL, "CreateImageViewer");
-	LOAD_IMAGE_FUNC pLoadImage = (LOAD_IMAGE_FUNC)GetProcAddress(hImageCoreDLL, "LoadImageFile");
+    // 5. 이미지 로드 테스트
+    if (pLoadImage) {
+        std::string sampleImagePath = std::filesystem::current_path().parent_path().string()
+            + "\\Image\\osaka.jpg";
+        pLoadImage(sampleImagePath);
+    }
 
-	ZOOM_IN_FUNC pZoomIn = (ZOOM_IN_FUNC)GetProcAddress(hImageCoreDLL, "ZoomIn");
-	ZOOM_OUT_FUNC pZoomOut = (ZOOM_OUT_FUNC)GetProcAddress(hImageCoreDLL, "ZoomOut");
-	RESET_ZOOM_FUNC pResetZoom = (RESET_ZOOM_FUNC)GetProcAddress(hImageCoreDLL, "ResetZoom");
+    // 메시지 루프
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
 
-	SET_POS_FUNC pSetVeiwerPosition = (SET_POS_FUNC)GetProcAddress(hImageCoreDLL, "SetViewerPosition");
-
-	pGetViewerHandle = (GET_VIEWER_HANDLE_FUNC)GetProcAddress(hImageCoreDLL, "GetViewerHandle");
-
-	if (!pCreateViewer)
-	{
-		MessageBox(NULL, _T("CreateImageViewer 함수를 찾을 수 없습니다."), _T("Error"), MB_OK | MB_ICONERROR);
-		FreeLibrary(hImageCoreDLL);
-		return 1;
-	}
-
-	// ---------------------------------------------------------------
-	// 테스트 실행
-	// ---------------------------------------------------------------
-
-	// C++ Core 초기화
-	if (pInitialize)
-		pInitialize();
-
-	// 테스트용 부모 창 생성
-
-	const TCHAR* TEST_WINDOW_CLASS = _T("IMageCoreTesterParentClass");
-	WNDCLASSEX wc = { sizeof(WNDCLASSEX) };
-	wc.lpfnWndProc = TestParentWndProc;
-	wc.hInstance = hInstance;
-	wc.lpszClassName = TEST_WINDOW_CLASS;
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-
-	if(!RegisterClassEx(&wc))
-	{
-		MessageBoxW(NULL, _T("테스트 부모 창 클래스를 등록할 수 없습니다."), _T("Error"), MB_OK | MB_ICONERROR);
-		FreeLibrary(hImageCoreDLL);
-		return 1;
-	}
-
-	HWND hTestParent = CreateWindowExW(
-		0, TEST_WINDOW_CLASS, _T("Test Parent Window"), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-		100, 100, 800, 600, NULL, NULL, hInstance, NULL);
-
-	// 뷰어 생성 함수 호출
-	HWND hViewer = pCreateViewer(hTestParent);
-
-	if (hViewer == NULL)
-	{
-		MessageBox(hTestParent, _T("Image Viewer 생성 실패"), _T("Error"), MB_OK | MB_ICONERROR);
-	}
-	else
-	{
-		// 뷰어 위치 설정 테스트
-		if (pSetVeiwerPosition)
-		{
-			pSetVeiwerPosition(50, 50, 700, 500);
-		}
-
-		// 이미지 로드 테스트
-		if (pLoadImage)
-		{
-			std::string sampleImagePath = std::filesystem::current_path().parent_path().string() 
-				+ "\\Image\\osaka.jpg";
-			
-			pLoadImage(sampleImagePath);
-		}
-
-		// 메시지 루프 실행
-		MSG msg = { 0 };
-		while (GetMessage(&msg, NULL, 0, 0))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-	}
-	
-	FreeLibrary(hImageCoreDLL);
-	return 0;
+    FreeLibrary(hDLL);
+    return 0;
 }

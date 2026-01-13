@@ -19,7 +19,7 @@ extern "C" {
 	IMAGECORE_API void TerminateImageCore();
 
 	// ºä¾î Ã¢ »ý¼º ¹× ÇÚµé ¹ÝÈ¯ ÇÔ¼ö
-	IMAGECORE_API HWND CreateImageViewer(HWND hParent);
+	IMAGECORE_API HWND CreateViewer(HWND hParent);
 
 	// ºä¾î Ã¢ ÇÚµé È¹µæ ÇÔ¼ö
 	IMAGECORE_API HWND GetViewerHandle();

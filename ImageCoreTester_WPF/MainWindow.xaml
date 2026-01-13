@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ImageCoreTester_WPF"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800"
-        Loaded="Window_Loaded" Closing="Window_Closing">
+        Title="Image Core WPF" Height="450" Width="800"
+        Loaded="Window_Loaded" Closing="Window_Closing" WindowStyle="ThreeDBorderWindow">
     <Grid>
         <!--<Border BorderBrush="Gray" BorderThickness="1" 
                 x:Name="HostBorder" 

@@ -3,6 +3,15 @@
 #include "ImageCore.h"
 #include "FileParser.h"
 #include <filesystem>
+#include <dwmapi.h>
+
+#pragma comment(lib, "dwmapi.lib")
+
+WNDPROC g_OldParentProc = NULL;
+HWND g_hParent = NULL;
+const int TOP_BAR_HEIGHT = 30;
+bool g_isFullScreen = false;
+WINDOWPLACEMENT g_wpPrev = { sizeof(WINDOWPLACEMENT) };
 
 // 전역, 정적 변수
 HWND g_hWndViewer = NULL;
@@ -248,7 +257,134 @@ IMAGECORE_API void ResetZoom()
     ApplyZoomAndRedraw();
 	FitImageToWindow(g_hWndViewer);
 }
+// 프로그램 각진 모서리
+void SetSquareCorners(HWND hWnd)
+{
+    int cornerPolicy = 1;   // DWMWCP_DONOTROUND
+    DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPolicy, sizeof(cornerPolicy));
+}
 
+// 전체화면 토글 함수
+void InternalToggleFullScreen(HWND hWnd)
+{
+    DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+    if (!g_isFullScreen)
+    {
+        if (GetWindowPlacement(hWnd, &g_wpPrev))
+        {
+            HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY);
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfo(hMonitor, &mi))
+            {
+                g_isFullScreen = true;
+                SetWindowLong(hWnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+                SetWindowPos(hWnd, HWND_TOP,
+                    mi.rcMonitor.left, mi.rcMonitor.top,
+                    mi.rcMonitor.right - mi.rcMonitor.left,
+                    mi.rcMonitor.bottom - mi.rcMonitor.top,
+                    SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            }
+        }
+    }
+    else
+    {
+        g_isFullScreen = false;
+        SetWindowLong(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_THICKFRAME);
+        SetWindowPlacement(hWnd, &g_wpPrev);
+        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        SetSquareCorners(hWnd);
+    }
+}
+
+LRESULT CALLBACK ParentSubclassProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    const int border_width = 8;
+
+    switch (message)
+    {
+    case WM_NCHITTEST:
+    {
+        if (g_isFullScreen) return HTCLIENT;
+        POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+        ScreenToClient(hWnd, &pt);
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+
+        if (pt.y < border_width)
+        {
+            if (pt.x < border_width) return HTTOPLEFT;
+            if (pt.x > rc.right - border_width) return HTTOPRIGHT;
+            return HTTOP;
+        }
+        if (pt.y > rc.bottom - border_width)
+        {
+            if (pt.x < border_width) return HTBOTTOMLEFT;
+            if (pt.x > rc.right - border_width) return HTBOTTOMRIGHT;
+            return HTBOTTOM;
+        }
+        if (pt.x < border_width) return HTLEFT;
+        if (pt.x > rc.right - border_width) return HTRIGHT;
+
+        if (pt.y < TOP_BAR_HEIGHT) return HTCAPTION;
+        return HTCLIENT;
+    }
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        if (!g_isFullScreen) {
+            RECT rc; GetClientRect(hWnd, &rc);
+            RECT barRect = { 0, 0, rc.right, TOP_BAR_HEIGHT };
+            HBRUSH hBrush = CreateSolidBrush(RGB(45, 45, 48));
+            FillRect(hdc, &barRect, hBrush);
+            DeleteObject(hBrush);
+
+            SetTextColor(hdc, RGB(220, 220, 220));
+            SetBkMode(hdc, TRANSPARENT);
+            const TCHAR* title = _T(" EIP");
+            DrawText(hdc, title, -1, &barRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+        EndPaint(hWnd, &ps);
+        return 0;
+    }
+    case WM_SIZE:
+    {
+        int w = LOWORD(lParam);
+        int h = HIWORD(lParam);
+        if (g_hWndViewer) {
+            if (g_isFullScreen) MoveWindow(g_hWndViewer, 0, 0, w, h, TRUE);
+            else MoveWindow(g_hWndViewer, 0, TOP_BAR_HEIGHT, w, h - TOP_BAR_HEIGHT, TRUE);
+        }
+        break;
+    }
+    case WM_KEYDOWN:
+    {
+        if (wParam == VK_ESCAPE)
+        {
+            PostQuitMessage(0);
+            return 0;
+        }
+        if (wParam == VK_F11)
+        {
+            InternalToggleFullScreen(hWnd);
+            return 0;
+        }
+        // 자식 뷰어로 키 전달
+        // if (g_hWndViewer) SendMessage(g_hWndViewer, message, wParam, lParam);
+        break;
+    }
+
+    case WM_DESTROY:
+    {
+        // 서브클래싱 해제
+        SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_OldParentProc);
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+    return CallWindowProc(g_OldParentProc, hWnd, message, wParam, lParam);
+}
 
 // ---------------------------------------------------------------
 // Win32 API 뷰어 창 프로시저 (WndProc)
@@ -499,7 +635,8 @@ case WM_PAINT:
 
             ZeroMemory(&bmi_storage, sizeof(bmi_storage));
             bmi_storage.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            bmi_storage.bmiHeader.biWidth = (int)(roiMat.step / bytesPerPixel);
+             bmi_storage.bmiHeader.biWidth = (int)(roiMat.step / bytesPerPixel);
+			//bmi_storage.bmiHeader.biWidth = roiMat.cols;
             bmi_storage.bmiHeader.biHeight = -roiMat.rows; // Top-Down
             bmi_storage.bmiHeader.biPlanes = 1;
             bmi_storage.bmiHeader.biBitCount = (WORD)(bytesPerPixel * 8);
@@ -644,7 +781,7 @@ case WM_PAINT:
             SetTextColor(hMemDC, RGB(255, 255, 255));
 
             // 왼쪽 정보: 마우스 좌표 및 픽셀 값
-            TCHAR leftText[256];
+            TCHAR leftText[256] = { 0, };
 
             int imgX = (int)std::floor((g_mousePoint.x - g_offsetX) * invScale);
             int imgY = (int)std::floor((g_mousePoint.y - g_offsetY) * invScale);
@@ -662,6 +799,9 @@ case WM_PAINT:
                     cv::Vec3b p = g_currentImage.at<cv::Vec3b>(imgY, imgX);
                     _stprintf_s(leftText, _T("  X: %d, Y: %d | R: %d G: %d B: %d"), imgX, imgY, p[2], p[1], p[0]);
                 }
+            }
+            else {
+                _stprintf_s(leftText, _T("  X: ---, Y: --- | Value: N/A"));
             }
             DrawText(hMemDC, leftText, -1, &barRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
@@ -742,42 +882,6 @@ IMAGECORE_API void TerminateImageCore()
 }
 
 // ---------------------------------------------------------------
-// 뷰어 창 생성 및 통합 함수
-// ---------------------------------------------------------------
-IMAGECORE_API HWND CreateImageViewer(HWND hParent)
-{
-    if (g_hWndViewer != NULL)
-        return g_hWndViewer;
-
-    HINSTANCE hInstance = GetModuleHandle(NULL);
-
-    // 윈도우 클래스 등록
-    if (!RegisterViewerClass(hInstance))
-        return NULL;
-
-	// 뷰어 창 생성
-    g_hWndViewer = CreateWindowEx(
-        0,                      // 확장 윈도우 스타일
-        VIEWER_CLASS_NAME,      // 클래스 이름
-        L"",                   // 윈도우 제목
-        WS_CHILD | WS_VISIBLE,  // 윈도우 스타일: 자식 윈도우로 생성 및 보이기
-        0, 0,                   // 위치
-        800, 600,               // 크기 (초기값)
-        hParent,                // 부모 윈도우 핸들
-        NULL,                   // 메뉴 핸들
-        hInstance,              // 인스턴스 핸들
-        NULL                    // 추가 매개변수
-    );
-
-    if (g_hWndViewer)
-    {
-        DragAcceptFiles(g_hWndViewer, TRUE);
-    }
-
-    return g_hWndViewer;
-}
-
-// ---------------------------------------------------------------
 // 뷰어 핸들 획듳 및 영상 처리 함수 0
 // ---------------------------------------------------------------
 IMAGECORE_API HWND GetViewerHandle()
@@ -813,6 +917,38 @@ IMAGECORE_API void RequestViewerRedraw()
     {
         InvalidateRect(g_hWndViewer, NULL, TRUE);
     }
+}
+
+IMAGECORE_API HWND CreateViewer(HWND hParent)
+{
+    g_hParent = hParent;
+
+    // 1. 부모 창 스타일 및 모서리 강제 설정
+    SetWindowLong(hParent, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_THICKFRAME);
+    SetSquareCorners(hParent);
+
+    // 2. 부모 창 메시지 가로채기 (Subclassing) ⭐
+    g_OldParentProc = (WNDPROC)SetWindowLongPtr(hParent, GWLP_WNDPROC, (LONG_PTR)ParentSubclassProc);
+
+    // 3. 자식 창(Viewer) 생성
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX) };
+    if (!GetClassInfoEx(hInstance, VIEWER_CLASS_NAME, &wc)) {
+        wc.lpfnWndProc = ViewerWndProc;
+        wc.hInstance = hInstance;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        wc.lpszClassName = VIEWER_CLASS_NAME;
+        RegisterClassEx(&wc);
+    }
+
+    RECT rc; GetClientRect(hParent, &rc);
+    g_hWndViewer = CreateWindowEx(0, VIEWER_CLASS_NAME, NULL, WS_CHILD | WS_VISIBLE,
+        0, TOP_BAR_HEIGHT, rc.right, rc.bottom - TOP_BAR_HEIGHT, hParent, NULL, hInstance, NULL);
+
+    if (g_hWndViewer) DragAcceptFiles(g_hWndViewer, TRUE);
+
+    return g_hWndViewer;
 }
 
 
