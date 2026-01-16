@@ -19,7 +19,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
     HMODULE hDLL = LoadLibrary(_T("ImageCore.dll"));
     if (!hDLL) return 1;
 
-    auto pCreateViewer = (CREATE_VIEWER_FUNC)GetProcAddress(hDLL, "CreateImageViewer");
+    auto pCreateViewer = (CREATE_VIEWER_FUNC)GetProcAddress(hDLL, "CreateViewer");
     auto pLoadImage = (LOAD_IMAGE_FUNC)GetProcAddress(hDLL, "LoadImageFile");
 
     // 2. 부모 창 클래스 등록 (최소한의 설정)

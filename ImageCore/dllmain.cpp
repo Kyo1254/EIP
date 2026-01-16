@@ -9,7 +9,10 @@
 
 WNDPROC g_OldParentProc = NULL;
 HWND g_hParent = NULL;
+
 const int TOP_BAR_HEIGHT = 30;
+const int BORDER_WIDTH = 12;
+
 bool g_isFullScreen = false;
 WINDOWPLACEMENT g_wpPrev = { sizeof(WINDOWPLACEMENT) };
 
@@ -32,6 +35,7 @@ std::vector<std::wstring> g_fileList;
 int g_currentIndex = -1;
 
 POINT g_mousePoint = { 0, 0 };  // 마우스 위치 저장용 전역 변수
+
 
 struct PyramidLevel {
     cv::Mat image;
@@ -291,50 +295,89 @@ void InternalToggleFullScreen(HWND hWnd)
         g_isFullScreen = false;
         SetWindowLong(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_THICKFRAME);
         SetWindowPlacement(hWnd, &g_wpPrev);
-        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
+        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
         SetSquareCorners(hWnd);
     }
 }
 
 LRESULT CALLBACK ParentSubclassProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    const int border_width = 8;
-
     switch (message)
     {
-    case WM_NCHITTEST:
-    {
-        if (g_isFullScreen) return HTCLIENT;
-        POINT pt = { LOWORD(lParam), HIWORD(lParam) };
-        ScreenToClient(hWnd, &pt);
-        RECT rc;
-        GetClientRect(hWnd, &rc);
-
-        if (pt.y < border_width)
+        case WM_NCCALCSIZE:
         {
-            if (pt.x < border_width) return HTTOPLEFT;
-            if (pt.x > rc.right - border_width) return HTTOPRIGHT;
-            return HTTOP;
+            if (wParam == TRUE) return 0;
+            break;
         }
-        if (pt.y > rc.bottom - border_width)
+        case WM_NCACTIVATE:
         {
-            if (pt.x < border_width) return HTBOTTOMLEFT;
-            if (pt.x > rc.right - border_width) return HTBOTTOMRIGHT;
-            return HTBOTTOM;
+            return TRUE;
         }
-        if (pt.x < border_width) return HTLEFT;
-        if (pt.x > rc.right - border_width) return HTRIGHT;
 
-        if (pt.y < TOP_BAR_HEIGHT) return HTCAPTION;
-        return HTCLIENT;
-    }
+        case WM_NCPAINT:
+        {
+            return 0;
+        }
+        case WM_NCHITTEST:
+        {
+            if (g_isFullScreen) return HTCLIENT;
 
-    case WM_PAINT:
-    {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
-        if (!g_isFullScreen) {
+            POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+            RECT rc;
+            GetWindowRect(hWnd, &rc);
+
+
+            // 상면
+            if (pt.y >= rc.top && pt.y < rc.top + BORDER_WIDTH)
+            {
+                if (pt.x < rc.left + BORDER_WIDTH) return HTTOPLEFT;
+                if (pt.x >= rc.right - BORDER_WIDTH) return HTTOPRIGHT;
+                return HTTOP;
+            }
+
+            // 하면
+            if (pt.y >= rc.bottom - BORDER_WIDTH && pt.y <= rc.bottom)
+            {
+                if (pt.x < rc.left + BORDER_WIDTH) return HTBOTTOMLEFT;
+                if (pt.x >= rc.right - BORDER_WIDTH) return HTBOTTOMRIGHT;
+                return HTBOTTOM;
+            }
+
+            // 좌면
+            if (pt.x >= rc.left && pt.x < rc.left + BORDER_WIDTH) return HTLEFT;
+
+            // 우면
+            if (pt.x <= rc.right && pt.x > rc.right - BORDER_WIDTH) return HTRIGHT;
+
+            // 클라이언트 좌표 변환하여 상단바 드래그 판정        
+
+            POINT ptClient = pt;
+            ScreenToClient(hWnd, &ptClient);
+            if (ptClient.y < TOP_BAR_HEIGHT) return HTCAPTION;
+
+            return HTCLIENT;
+        }
+        case WM_GETMINMAXINFO:
+        {
+            MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+
+            mmi->ptMinTrackSize.x = 400;
+            mmi->ptMinTrackSize.y = 300;
+
+            return 0;
+        }
+
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
             RECT rc; GetClientRect(hWnd, &rc);
+
+            HBRUSH hBgBrush = CreateSolidBrush(RGB(30, 30, 30));
+            FillRect(hdc, &rc, hBgBrush);
+            DeleteObject(hBgBrush);
+
             RECT barRect = { 0, 0, rc.right, TOP_BAR_HEIGHT };
             HBRUSH hBrush = CreateSolidBrush(RGB(45, 45, 48));
             FillRect(hdc, &barRect, hBrush);
@@ -344,44 +387,58 @@ LRESULT CALLBACK ParentSubclassProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
             SetBkMode(hdc, TRANSPARENT);
             const TCHAR* title = _T(" EIP");
             DrawText(hdc, title, -1, &barRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+            if (!g_isFullScreen)
+            {
+                HBRUSH hBgBrush = CreateSolidBrush(RGB(30, 30, 30));
+                RECT leftMargin = { 0, TOP_BAR_HEIGHT, BORDER_WIDTH, rc.bottom };
+                RECT rightMargin = { rc.right - BORDER_WIDTH, TOP_BAR_HEIGHT, rc.right, rc.bottom };
+                RECT bottomMargin = { BORDER_WIDTH, rc.bottom - BORDER_WIDTH, rc.right - BORDER_WIDTH, rc.bottom };
+
+                FillRect(hdc, &leftMargin, hBgBrush);
+                FillRect(hdc, &rightMargin, hBgBrush);
+                FillRect(hdc, &bottomMargin, hBgBrush);
+                DeleteObject(hBgBrush);
+            }
+
+            EndPaint(hWnd, &ps);
+            return 0;
         }
-        EndPaint(hWnd, &ps);
-        return 0;
-    }
-    case WM_SIZE:
-    {
-        int w = LOWORD(lParam);
-        int h = HIWORD(lParam);
-        if (g_hWndViewer) {
-            if (g_isFullScreen) MoveWindow(g_hWndViewer, 0, 0, w, h, TRUE);
-            else MoveWindow(g_hWndViewer, 0, TOP_BAR_HEIGHT, w, h - TOP_BAR_HEIGHT, TRUE);
-        }
-        break;
-    }
-    case WM_KEYDOWN:
-    {
-        if (wParam == VK_ESCAPE)
+        case WM_SIZE:
         {
+            int w = LOWORD(lParam);
+            int h = HIWORD(lParam);
+            if (g_hWndViewer) {
+                if (g_isFullScreen) MoveWindow(g_hWndViewer, 0, TOP_BAR_HEIGHT, w, h - TOP_BAR_HEIGHT, TRUE);
+                else MoveWindow(g_hWndViewer, BORDER_WIDTH, TOP_BAR_HEIGHT, w - (BORDER_WIDTH * 2), h - TOP_BAR_HEIGHT - BORDER_WIDTH, TRUE);
+            }
+            break;
+        }
+        case WM_KEYDOWN:
+        {
+            if (wParam == VK_ESCAPE)
+            {
+                PostQuitMessage(0);
+                return 0;
+            }
+            if (wParam == VK_F11)
+            {
+                InternalToggleFullScreen(hWnd);
+                return 0;
+            }
+            // 자식 뷰어로 키 전달
+            // if (g_hWndViewer) SendMessage(g_hWndViewer, message, wParam, lParam);
+            break;
+        }
+
+
+        case WM_DESTROY:
+        {
+            // 서브클래싱 해제
+            SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_OldParentProc);
             PostQuitMessage(0);
             return 0;
         }
-        if (wParam == VK_F11)
-        {
-            InternalToggleFullScreen(hWnd);
-            return 0;
-        }
-        // 자식 뷰어로 키 전달
-        // if (g_hWndViewer) SendMessage(g_hWndViewer, message, wParam, lParam);
-        break;
-    }
-
-    case WM_DESTROY:
-    {
-        // 서브클래싱 해제
-        SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_OldParentProc);
-        PostQuitMessage(0);
-        return 0;
-    }
     }
     return CallWindowProc(g_OldParentProc, hWnd, message, wParam, lParam);
 }
@@ -401,37 +458,37 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
         if (fileCount > 0)
         {
             // 기존 리스트 초기화
-			g_fileList.clear();
+            g_fileList.clear();
 
             // 드롭된 모든 파일 경로를 리스트에 저장
             for (UINT i = 0; i < fileCount; ++i)
             {
                 wchar_t widePath[MAX_PATH];
-				DragQueryFile(hDrop, i, widePath, MAX_PATH);
+                DragQueryFile(hDrop, i, widePath, MAX_PATH);
                 g_fileList.push_back(widePath);
             }
             LoadImageByIndex(0);
         }
-		DragFinish(hDrop);
+        DragFinish(hDrop);
     }
-    return 0;
+    //return 0;
 
     case WM_MOUSEWHEEL:
     {
         short delta = HIWORD(wParam);
 
         // 1. 마우스 포인터의 클라이언트 좌표 획득
-		POINT ptScreen = { LOWORD(lParam), HIWORD(lParam) };
-		ScreenToClient(hWnd, &ptScreen);
-		int mouseX = ptScreen.x;
-		int mouseY = ptScreen.y;
+        POINT ptScreen = { LOWORD(lParam), HIWORD(lParam) };
+        ScreenToClient(hWnd, &ptScreen);
+        int mouseX = ptScreen.x;
+        int mouseY = ptScreen.y;
 
-		// 2. 현재 스케일과 오프셋을 사용하여 마우스 위치의 이미지 좌표 계산
+        // 2. 현재 스케일과 오프셋을 사용하여 마우스 위치의 이미지 좌표 계산
         double imgX = (mouseX - g_offsetX) / g_scaleFactor;
-		double imgY = (mouseY - g_offsetY) / g_scaleFactor;
+        double imgY = (mouseY - g_offsetY) / g_scaleFactor;
 
         // 3. 새로운 스케일 계산
-		double oldScale = g_scaleFactor;
+        double oldScale = g_scaleFactor;
         double zoomFactor = 0.1;
 
         if (delta > 0) // Zoom In
@@ -441,39 +498,39 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
         else if (delta < 0) // Zoom Out
         {
             g_scaleFactor /= (1.0 + zoomFactor);
-		}
+        }
 
-		g_scaleFactor = std::max(g_scaleFactor, 0.02); // 최소 스케일 제한
-		g_scaleFactor = std::min(g_scaleFactor, 128.0); // 최대 스케일 제한
+        g_scaleFactor = std::max(g_scaleFactor, 0.02); // 최소 스케일 제한
+        g_scaleFactor = std::min(g_scaleFactor, 128.0); // 최대 스케일 제한
 
 
-		//4 . 새로운 오프셋 계산 (마우스 위치 고정)
-		g_offsetX = (int)std::round(mouseX - (imgX * g_scaleFactor));
-		g_offsetY = (int)std::round(mouseY - (imgY * g_scaleFactor));
+        //4 . 새로운 오프셋 계산 (마우스 위치 고정)
+        g_offsetX = (int)std::round(mouseX - (imgX * g_scaleFactor));
+        g_offsetY = (int)std::round(mouseY - (imgY * g_scaleFactor));
 
         RequestViewerRedraw();
 
         return 0;
     }
-    
+
     case WM_LBUTTONDOWN:
     {
-        if(g_displayImage.empty())
-			break;
+        if (g_displayImage.empty())
+            break;
 
         SetCapture(hWnd);
 
-		g_isPanning = true;
+        g_isPanning = true;
 
-		g_lastMousePos.x = LOWORD(lParam);
+        g_lastMousePos.x = LOWORD(lParam);
         g_lastMousePos.y = HIWORD(lParam);
-		return 0;
+        return 0;
     }
 
     case WM_MOUSEMOVE:
     {
-		g_mousePoint.x = LOWORD(lParam);
-		g_mousePoint.y = HIWORD(lParam);
+        g_mousePoint.x = LOWORD(lParam);
+        g_mousePoint.y = HIWORD(lParam);
 
         if (g_isPanning && !g_displayImage.empty())
         {
@@ -489,10 +546,10 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
             g_lastMousePos.x = currentX;
             g_lastMousePos.y = currentY;
         }
-        
+
         RequestViewerRedraw();
-        
-		return 0;
+
+        return 0;
     }
 
     case WM_LBUTTONUP:
@@ -501,7 +558,7 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
         {
             ReleaseCapture();
 
-			g_isPanning = false;
+            g_isPanning = false;
         }
         return 0;
     }
@@ -510,7 +567,7 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
     {
         if ((HWND)lParam != hWnd && g_isPanning)
         {
-			g_isPanning = false;
+            g_isPanning = false;
         }
         break;
     }
@@ -519,31 +576,31 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
     case WM_MBUTTONDOWN:
     {
         ResetZoom();
-        
+
         return 0;
     }
-    
+
     case WM_KEYDOWN:
     {
         if (g_fileList.empty())
             break;
 
-		int newIndex = g_currentIndex;
+        int newIndex = g_currentIndex;
 
         // page up/down 키 처리
         if (wParam == VK_PRIOR) // Page Up
         {
             newIndex--;
         }
-        else if(wParam == VK_NEXT) // Page Down
+        else if (wParam == VK_NEXT) // Page Down
         {
             newIndex++;
-		}
+        }
 
         // 인덱스 범위 확인 및 조정
         if (newIndex >= 0 && newIndex < g_fileList.size())
         {
-			LoadImageByIndex(newIndex);
+            LoadImageByIndex(newIndex);
         }
         else if (newIndex < 0)
         {
@@ -551,312 +608,329 @@ LRESULT CALLBACK ViewerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
         }
         else if (newIndex >= g_fileList.size())
         {
-			LoadImageByIndex(0);
+            LoadImageByIndex(0);
         }
     }
     return 0;
     case WM_ERASEBKGND:
         return TRUE;
-    
-case WM_PAINT:
-{
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hWnd, &ps);
 
-    if (!g_displayImage.empty())
+    case WM_PAINT:
     {
-        // 1. 창 크기 및 기본 정보 획득
-        RECT clientRect;
-        GetClientRect(hWnd, &clientRect);
-        int winW = clientRect.right - clientRect.left;
-        int winH = clientRect.bottom - clientRect.top;
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
 
-        // 2. 이중 버퍼링(Double Buffering) 설정
-        HDC hMemDC = CreateCompatibleDC(hdc);
-        HBITMAP hBitmap = CreateCompatibleBitmap(hdc, winW, winH);
-        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
-
-        // 배경을 윈도우 기본 색으로 채우기
-        HBRUSH hBgBrush = GetSysColorBrush(COLOR_WINDOW);
-        FillRect(hMemDC, &clientRect, hBgBrush);
-        DeleteObject(hBgBrush);
-
-        // 현재 배율에 최적화된 피라미드 선택 ⭐
-        PyramidLevel* pLevel = GetBestPyramid(g_scaleFactor);
-
-        if(!pLevel || pLevel->image.empty())
+        if (!g_displayImage.empty())
         {
-            EndPaint(hWnd, &ps);
-            return 0;
-		}
-        
-		cv::Mat& targetMat = pLevel->image;
-        
-        double invScale = 1.0 / g_scaleFactor;
-		double currentPyramidRatio = pLevel->ratio;
-        
-        double relativeScale = g_scaleFactor / currentPyramidRatio; // 선택된 이미지 기준 배율
-		double invRelativeScale = 1.0 / relativeScale;
+            // 1. 창 크기 및 기본 정보 획득
+            RECT clientRect;
+            GetClientRect(hWnd, &clientRect);
+            int winW = clientRect.right - clientRect.left;
+            int winH = clientRect.bottom - clientRect.top;
 
-        // 3. ROI(관심 영역) 계산 ⭐
-        // 화면 좌표를 이미지 좌표로 역산 (화면 밖 영역 포함)
-        
-        // g_offsetX, g_offsetY는 화면 상의 픽셀 오프셋
-        int roiX = (int)std::floor(-g_offsetX * invRelativeScale);
-        int roiY = (int)std::floor(-g_offsetY * invRelativeScale);
+            // 2. 이중 버퍼링(Double Buffering) 설정
+            HDC hMemDC = CreateCompatibleDC(hdc);
+            HBITMAP hBitmap = CreateCompatibleBitmap(hdc, winW, winH);
+            HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
 
-        // 화면 크기에 해당하는 피라미드 이미지의 픽셀 수
-        int roiW = (int)std::ceil(winW * invRelativeScale);
-        int roiH = (int)std::ceil(winH * invRelativeScale);
+            // 배경을 윈도우 기본 색으로 채우기
+            HBRUSH hBgBrush = GetSysColorBrush(COLOR_WINDOW);
+            FillRect(hMemDC, &clientRect, hBgBrush);
+            DeleteObject(hBgBrush);
 
-        cv::Rect imgRect(0, 0, targetMat.cols, targetMat.rows);
-        cv::Rect viewRect(roiX, roiY, roiW, roiH);
-        cv::Rect intersect = viewRect & imgRect;
+            // 현재 배율에 최적화된 피라미드 선택 ⭐
+            PyramidLevel* pLevel = GetBestPyramid(g_scaleFactor);
 
-        // 4. ROI 영역 렌더링
-        if (intersect.width > 0 && intersect.height > 0)
-        {
-            // 실제 데이터 복사 없이 해당 영역의 포인터만 참조
-            cv::Mat roiMat = targetMat(intersect);
-
-            // destX, destY: 원본 이미지의 0,0 위치를 기준으로 오프셋 적용
-            int destX = (int)(intersect.x * relativeScale + g_offsetX);
-            int destY = (int)(intersect.y * relativeScale + g_offsetY);
-            // destW, destH: ROI 영역을 relativeScale만큼 키운 크기
-            int destW = (int)(intersect.width * relativeScale);
-            int destH = (int)(intersect.height * relativeScale);
-
-            int bytesPerPixel = roiMat.channels();
-            // BITMAPINFO 설정 (ROI 이미지 크기에 맞춤)
-            static struct {
-                BITMAPINFOHEADER bmiHeader;
-                RGBQUAD bmiColors[256];
-            } bmi_storage;
-
-            ZeroMemory(&bmi_storage, sizeof(bmi_storage));
-            bmi_storage.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-             bmi_storage.bmiHeader.biWidth = (int)(roiMat.step / bytesPerPixel);
-			//bmi_storage.bmiHeader.biWidth = roiMat.cols;
-            bmi_storage.bmiHeader.biHeight = -roiMat.rows; // Top-Down
-            bmi_storage.bmiHeader.biPlanes = 1;
-            bmi_storage.bmiHeader.biBitCount = (WORD)(bytesPerPixel * 8);
-            bmi_storage.bmiHeader.biCompression = BI_RGB;
-
-            if (roiMat.channels() == 1) { // Grayscale 팔레트 설정
-                for (int i = 0; i < 256; i++) {
-                    bmi_storage.bmiColors[i].rgbRed = bmi_storage.bmiColors[i].rgbGreen = bmi_storage.bmiColors[i].rgbBlue = (BYTE)i;
-                }
+            if (!pLevel || pLevel->image.empty())
+            {
+                EndPaint(hWnd, &ps);
+                return 0;
             }
 
-            // 고품질 보간 대신 속도를 위해 COLORONCOLOR 사용 가능 (대용량 대응)
-            SetStretchBltMode(hMemDC, COLORONCOLOR);
-            SetBrushOrgEx(hMemDC, 0, 0, NULL);
+            cv::Mat& targetMat = pLevel->image;
 
-            StretchDIBits(hMemDC,
-                destX, destY, destW, destH,
-                0, 0, roiMat.cols, roiMat.rows,
-                roiMat.data, (BITMAPINFO*)&bmi_storage, DIB_RGB_COLORS, SRCCOPY);
-        }
+            double invScale = 1.0 / g_scaleFactor;
+            double currentPyramidRatio = pLevel->ratio;
 
-        if (g_scaleFactor < 10.0) {
-            SetStretchBltMode(hMemDC, COLORONCOLOR);
-        }
-        else {
-			SetStretchBltMode(hMemDC, HALFTONE);
-        }
+            double relativeScale = g_scaleFactor / currentPyramidRatio; // 선택된 이미지 기준 배율
+            double invRelativeScale = 1.0 / relativeScale;
 
-        // 5. 고배율 그리드 및 픽셀 값 표시 (g_scaleFactor >= 8.0)
+            // 3. ROI(관심 영역) 계산 ⭐
+            // 화면 좌표를 이미지 좌표로 역산 (화면 밖 영역 포함)
 
-		const double PIXEL_DISPLAY_THRESHOLD = 8.0;
+            // g_offsetX, g_offsetY는 화면 상의 픽셀 오프셋
+            int roiX = (int)std::floor(-g_offsetX * invRelativeScale);
+            int roiY = (int)std::floor(-g_offsetY * invRelativeScale);
 
-        if (g_scaleFactor >= PIXEL_DISPLAY_THRESHOLD && !g_currentImage.empty()) 
-        {
-            SetBkMode(hMemDC, TRANSPARENT);
+            // 화면 크기에 해당하는 피라미드 이미지의 픽셀 수
+            int roiW = (int)std::ceil(winW * invRelativeScale);
+            int roiH = (int)std::ceil(winH * invRelativeScale);
 
-			double invScale = 1.0 / g_scaleFactor;
-            // 화면 좌상단(0,0)에 해당하는 원본 이미지 픽셀의 시작점
-            int startX = (int)std::max(0.0, std::floor((-g_offsetX * invScale)));
-            int startY = (int)std::max(0.0, std::floor((-g_offsetY * invScale)));
+            cv::Rect imgRect(0, 0, targetMat.cols, targetMat.rows);
+            cv::Rect viewRect(roiX, roiY, roiW, roiH);
+            cv::Rect intersect = viewRect & imgRect;
 
-            // 화면 우하단에 해당하는 원본 이미지 픽셀의 끝점 (+1 하여 포함)
-            int endX = (int)std::min((double)g_currentImage.cols, std::ceil((winW - g_offsetX) * invScale));
-            int endY = (int)std::min((double)g_currentImage.rows, std::ceil((winH - g_offsetY) * invScale));
-
-            int imgW = g_currentImage.cols;
-            int imgH = g_currentImage.rows;
-            int matType = g_currentImage.type();
-            
-            int requiredMinSize = 40;
-           
-            // Grid 선을 그리기 위한 Pen 설정
-            HPEN hGridPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
-            HPEN hOldPen = (HPEN)SelectObject(hMemDC, hGridPen);
-            
-            const TCHAR* text = _T("255\n255\n255");
-
-            for (int y = startY; y < endY; y++)
+            // 4. ROI 영역 렌더링
+            if (intersect.width > 0 && intersect.height > 0)
             {
-                for (int x = startX; x < endX; x++)
+                // 실제 데이터 복사 없이 해당 영역의 포인터만 참조
+                cv::Mat roiMat = targetMat(intersect);
+
+                // destX, destY: 원본 이미지의 0,0 위치를 기준으로 오프셋 적용
+                int destX = (int)(intersect.x * relativeScale + g_offsetX);
+                int destY = (int)(intersect.y * relativeScale + g_offsetY);
+                // destW, destH: ROI 영역을 relativeScale만큼 키운 크기
+                int destW = (int)(intersect.width * relativeScale);
+                int destH = (int)(intersect.height * relativeScale);
+
+                int bytesPerPixel = roiMat.channels();
+                // BITMAPINFO 설정 (ROI 이미지 크기에 맞춤)
+                static struct {
+                    BITMAPINFOHEADER bmiHeader;
+                    RGBQUAD bmiColors[256];
+                } bmi_storage;
+
+                ZeroMemory(&bmi_storage, sizeof(bmi_storage));
+                bmi_storage.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bmi_storage.bmiHeader.biWidth = (int)(roiMat.step / bytesPerPixel);
+                //bmi_storage.bmiHeader.biWidth = roiMat.cols;
+                bmi_storage.bmiHeader.biHeight = -roiMat.rows; // Top-Down
+                bmi_storage.bmiHeader.biPlanes = 1;
+                bmi_storage.bmiHeader.biBitCount = (WORD)(bytesPerPixel * 8);
+                bmi_storage.bmiHeader.biCompression = BI_RGB;
+
+                if (roiMat.channels() == 1) { // Grayscale 팔레트 설정
+                    for (int i = 0; i < 256; i++) {
+                        bmi_storage.bmiColors[i].rgbRed = bmi_storage.bmiColors[i].rgbGreen = bmi_storage.bmiColors[i].rgbBlue = (BYTE)i;
+                    }
+                }
+
+                // 고품질 보간 대신 속도를 위해 COLORONCOLOR 사용 가능 (대용량 대응)
+                SetStretchBltMode(hMemDC, COLORONCOLOR);
+                SetBrushOrgEx(hMemDC, 0, 0, NULL);
+
+                StretchDIBits(hMemDC,
+                    destX, destY, destW, destH,
+                    0, 0, roiMat.cols, roiMat.rows,
+                    roiMat.data, (BITMAPINFO*)&bmi_storage, DIB_RGB_COLORS, SRCCOPY);
+            }
+
+            if (g_scaleFactor < 10.0) {
+                SetStretchBltMode(hMemDC, COLORONCOLOR);
+            }
+            else {
+                SetStretchBltMode(hMemDC, HALFTONE);
+            }
+
+            // 5. 고배율 그리드 및 픽셀 값 표시 (g_scaleFactor >= 8.0)
+
+            const double PIXEL_DISPLAY_THRESHOLD = 8.0;
+
+            if (g_scaleFactor >= PIXEL_DISPLAY_THRESHOLD && !g_currentImage.empty())
+            {
+                SetBkMode(hMemDC, TRANSPARENT);
+
+                double invScale = 1.0 / g_scaleFactor;
+                // 화면 좌상단(0,0)에 해당하는 원본 이미지 픽셀의 시작점
+                int startX = (int)std::max(0.0, std::floor((-g_offsetX * invScale)));
+                int startY = (int)std::max(0.0, std::floor((-g_offsetY * invScale)));
+
+                // 화면 우하단에 해당하는 원본 이미지 픽셀의 끝점 (+1 하여 포함)
+                int endX = (int)std::min((double)g_currentImage.cols, std::ceil((winW - g_offsetX) * invScale));
+                int endY = (int)std::min((double)g_currentImage.rows, std::ceil((winH - g_offsetY) * invScale));
+
+                int imgW = g_currentImage.cols;
+                int imgH = g_currentImage.rows;
+                int matType = g_currentImage.type();
+
+                int requiredMinSize = 40;
+
+                // Grid 선을 그리기 위한 Pen 설정
+                HPEN hGridPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+                HPEN hOldPen = (HPEN)SelectObject(hMemDC, hGridPen);
+
+                const TCHAR* text = _T("255\n255\n255");
+
+                for (int y = startY; y < endY; y++)
                 {
-                    int screenX = g_offsetX + (int)(x * g_scaleFactor);
-                    int screenY = g_offsetY + (int)(y * g_scaleFactor);
-                    int scaledSize = (int)g_scaleFactor;
-
-                    if (screenX + scaledSize > 0 && screenY + scaledSize > 0 &&
-                        screenX < winW && screenY < winH && scaledSize >= requiredMinSize)
+                    for (int x = startX; x < endX; x++)
                     {
-                        // Pixel Grid 선 그리기
-                        HBRUSH hOldBrush = (HBRUSH)SelectObject(hMemDC, GetStockObject(NULL_BRUSH));
-                        Rectangle(hMemDC, screenX, screenY, screenX + scaledSize, screenY + scaledSize);
-                        SelectObject(hMemDC, hOldBrush);
+                        int screenX = g_offsetX + (int)(x * g_scaleFactor);
+                        int screenY = g_offsetY + (int)(y * g_scaleFactor);
+                        int scaledSize = (int)g_scaleFactor;
 
-                        if (scaledSize >= requiredMinSize)
+                        if (screenX + scaledSize > 0 && screenY + scaledSize > 0 &&
+                            screenX < winW && screenY < winH && scaledSize >= requiredMinSize)
                         {
-                            if (matType == CV_8UC3)
+                            // Pixel Grid 선 그리기
+                            HBRUSH hOldBrush = (HBRUSH)SelectObject(hMemDC, GetStockObject(NULL_BRUSH));
+                            Rectangle(hMemDC, screenX, screenY, screenX + scaledSize, screenY + scaledSize);
+                            SelectObject(hMemDC, hOldBrush);
+
+                            if (scaledSize >= requiredMinSize)
                             {
-                                cv::Vec3b pixel = g_currentImage.at<cv::Vec3b>(y, x);
-                                int b = pixel[0];
-                                int g = pixel[1];
-                                int r = pixel[2];
-
-                                // R, G, B 채널 데이터 정의
-                                struct ChannelData { int value; COLORREF color; const TCHAR* label; };
-                                ChannelData channelsData[] = {
-                                    { r, RGB(255, 0, 0), _T("R") }, // R: 빨간색
-                                    { g, RGB(0, 255, 0), _T("G") }, // G: 초록색
-                                    { b, RGB(0, 0, 255), _T("B") }  // B: 파란색
-                                };
-
-                                // 픽셀 블록 내에서 각 값을 표시할 공간 계산 (3등분)
-                                int lineHeight = scaledSize / 3;
-
-                                // R, G, B 세 줄을 순회하며 출력
-                                for (int i = 0; i < 3; ++i)
+                                if (matType == CV_8UC3)
                                 {
-                                    TCHAR text[16];
-                                    // "R:255"와 같은 포맷으로 출력
-                                    _stprintf_s(text, 16, _T("%d"), channelsData[i].value);
+                                    cv::Vec3b pixel = g_currentImage.at<cv::Vec3b>(y, x);
+                                    int b = pixel[0];
+                                    int g = pixel[1];
+                                    int r = pixel[2];
 
-                                    int currentY = screenY + i * lineHeight;
+                                    // R, G, B 채널 데이터 정의
+                                    struct ChannelData { int value; COLORREF color; const TCHAR* label; };
+                                    ChannelData channelsData[] = {
+                                        { r, RGB(255, 0, 0), _T("R") }, // R: 빨간색
+                                        { g, RGB(0, 255, 0), _T("G") }, // G: 초록색
+                                        { b, RGB(0, 0, 255), _T("B") }  // B: 파란색
+                                    };
 
-                                    // ⭐ B. 채널별 고유 색상 설정 ⭐
-                                    SetTextColor(hMemDC, channelsData[i].color);
+                                    // 픽셀 블록 내에서 각 값을 표시할 공간 계산 (3등분)
+                                    int lineHeight = scaledSize / 3;
 
-                                    RECT textRect = { screenX, currentY, screenX + scaledSize, currentY + lineHeight };
-                                    DrawText(hMemDC, text, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                    // R, G, B 세 줄을 순회하며 출력
+                                    for (int i = 0; i < 3; ++i)
+                                    {
+                                        TCHAR text[16];
+                                        // "R:255"와 같은 포맷으로 출력
+                                        _stprintf_s(text, 16, _T("%d"), channelsData[i].value);
+
+                                        int currentY = screenY + i * lineHeight;
+
+                                        // ⭐ B. 채널별 고유 색상 설정 ⭐
+                                        SetTextColor(hMemDC, channelsData[i].color);
+
+                                        RECT textRect = { screenX, currentY, screenX + scaledSize, currentY + lineHeight };
+                                        DrawText(hMemDC, text, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                    }
                                 }
-                            }
-                            else if (matType == CV_8UC1) // GRAYSCALE (1채널) 이미지
-                            {
-                                uchar gray = g_currentImage.at<uchar>(y, x);
+                                else if (matType == CV_8UC1) // GRAYSCALE (1채널) 이미지
+                                {
+                                    uchar gray = g_currentImage.at<uchar>(y, x);
 
-                                TCHAR grayText[16];
-                                _stprintf_s(grayText, 16, _T("%d"), gray); // "G:255" 포맷으로 출력
+                                    TCHAR grayText[16];
+                                    _stprintf_s(grayText, 16, _T("%d"), gray); // "G:255" 포맷으로 출력
 
-                                // 1채널은 대비 색상 유지 (회색이므로 흰색/검은색이 가장 잘 보임)
-                                COLORREF contrastColor = (gray > 128) ? RGB(0, 0, 0) : RGB(255, 255, 255);
-                                SetTextColor(hMemDC, contrastColor);
+                                    // 1채널은 대비 색상 유지 (회색이므로 흰색/검은색이 가장 잘 보임)
+                                    COLORREF contrastColor = (gray > 128) ? RGB(0, 0, 0) : RGB(255, 255, 255);
+                                    SetTextColor(hMemDC, contrastColor);
 
-                                // 픽셀 블록 중앙에 출력
-                                RECT textRect = { screenX, screenY, screenX + scaledSize, screenY + scaledSize };
-                                DrawText(hMemDC, grayText, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                    // 픽셀 블록 중앙에 출력
+                                    RECT textRect = { screenX, screenY, screenX + scaledSize, screenY + scaledSize };
+                                    DrawText(hMemDC, grayText, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                                }
                             }
                         }
                     }
                 }
+                SelectObject(hMemDC, hOldPen);
+                DeleteObject(hGridPen);
             }
-            SelectObject(hMemDC, hOldPen);
-            DeleteObject(hGridPen);
-        }
 
-        // 6. 하단 상태 표시줄 (실시간 좌표, RGB, 파일명, 배율) ⭐
-        {
-            int barHeight = 30;
-            RECT barRect = { 0, winH - barHeight, winW, winH };
-            HBRUSH hStatusBrush = CreateSolidBrush(RGB(20, 20, 20));
-            FillRect(hMemDC, &barRect, hStatusBrush);
-            DeleteObject(hStatusBrush);
+            // 6. 하단 상태 표시줄 (실시간 좌표, RGB, 파일명, 배율) ⭐
+            {
+                int barHeight = 30;
+                RECT barRect = { 0, winH - barHeight, winW, winH };
+                HBRUSH hStatusBrush = CreateSolidBrush(RGB(20, 20, 20));
+                FillRect(hMemDC, &barRect, hStatusBrush);
+                DeleteObject(hStatusBrush);
 
-            SetBkMode(hMemDC, TRANSPARENT);
-            SetTextColor(hMemDC, RGB(255, 255, 255));
+                SetBkMode(hMemDC, TRANSPARENT);
+                SetTextColor(hMemDC, RGB(255, 255, 255));
 
-            // 왼쪽 정보: 마우스 좌표 및 픽셀 값
-            TCHAR leftText[256] = { 0, };
+                // 왼쪽 정보: 마우스 좌표 및 픽셀 값
+                TCHAR leftText[256] = { 0, };
 
-            int imgX = (int)std::floor((g_mousePoint.x - g_offsetX) * invScale);
-            int imgY = (int)std::floor((g_mousePoint.y - g_offsetY) * invScale);
-            if (imgX >= 0 && imgX < g_currentImage.cols && imgY >= 0 && imgY < g_currentImage.rows) {
-				int matType = g_currentImage.type();
+                int imgX = (int)std::floor((g_mousePoint.x - g_offsetX) * invScale);
+                int imgY = (int)std::floor((g_mousePoint.y - g_offsetY) * invScale);
+                if (imgX >= 0 && imgX < g_currentImage.cols && imgY >= 0 && imgY < g_currentImage.rows) {
+                    int matType = g_currentImage.type();
 
-                if (matType == CV_8UC1)
-                {
-					uchar value = g_currentImage.at<uchar>(imgY, imgX);
+                    if (matType == CV_8UC1)
+                    {
+                        uchar value = g_currentImage.at<uchar>(imgY, imgX);
 
-                    _stprintf_s(leftText, _T("  X: %d, Y: %d | Value: %d"), imgX, imgY, value);
+                        _stprintf_s(leftText, _T("  X: %d, Y: %d | Value: %d"), imgX, imgY, value);
+                    }
+                    else if (matType == CV_8UC3)
+                    {
+                        cv::Vec3b p = g_currentImage.at<cv::Vec3b>(imgY, imgX);
+                        _stprintf_s(leftText, _T("  X: %d, Y: %d | R: %d G: %d B: %d"), imgX, imgY, p[2], p[1], p[0]);
+                    }
                 }
-                else if (matType == CV_8UC3)
-                {
-                    cv::Vec3b p = g_currentImage.at<cv::Vec3b>(imgY, imgX);
-                    _stprintf_s(leftText, _T("  X: %d, Y: %d | R: %d G: %d B: %d"), imgX, imgY, p[2], p[1], p[0]);
+                else {
+                    _stprintf_s(leftText, _T("  X: ---, Y: --- | Value: N/A"));
                 }
-            }
-            else {
-                _stprintf_s(leftText, _T("  X: ---, Y: --- | Value: N/A"));
-            }
-            DrawText(hMemDC, leftText, -1, &barRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                DrawText(hMemDC, leftText, -1, &barRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-            // 오른쪽 정보: 배율 및 파일명
-            std::wstring fName = !g_fileList.empty() ? g_fileList[g_currentIndex] : L"No File";
-            size_t lastS = fName.find_last_of(L"\\/");
-            if (lastS != std::wstring::npos) fName = fName.substr(lastS + 1);
+                // 오른쪽 정보: 배율 및 파일명
+                std::wstring fName = !g_fileList.empty() ? g_fileList[g_currentIndex] : L"No File";
+                size_t lastS = fName.find_last_of(L"\\/");
+                if (lastS != std::wstring::npos) fName = fName.substr(lastS + 1);
 
-            TCHAR rightText[512];
-            _stprintf_s(rightText, _T("Scale: %.2f x | File: %s  "), g_scaleFactor, fName.c_str());
-            DrawText(hMemDC, rightText, -1, &barRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                TCHAR rightText[512];
+                _stprintf_s(rightText, _T("Scale: %.2f x | File: %s  "), g_scaleFactor, fName.c_str());
+                DrawText(hMemDC, rightText, -1, &barRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            }
+
+            // 7. 최종 결과 화면으로 전송 (BitBlt)
+            BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top,
+                ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
+                hMemDC, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+
+            // 8. 리소스 정리
+            SelectObject(hMemDC, hOldBitmap);
+            DeleteObject(hBitmap);
+            DeleteDC(hMemDC);
         }
-
-        // 7. 최종 결과 화면으로 전송 (BitBlt)
-        BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top,
-            ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
-            hMemDC, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
-
-        // 8. 리소스 정리
-        SelectObject(hMemDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        DeleteDC(hMemDC);
+        EndPaint(hWnd, &ps);
+        return 0;
     }
-    EndPaint(hWnd, &ps);
-    return 0;
-}
     case WM_SIZE:
+    {
         // WPF HwndHost의 크기가 변하면 메시지 전달
         // 뷰어의 렌더링 로직을 실행하고 갱신 요청
         if (wParam != SIZE_MINIMIZED)
         {
-            int width = LOWORD(lParam);
-			int height = HIWORD(lParam);    
+            int newwinW = LOWORD(lParam);
+			int newwinH = HIWORD(lParam);
 
-			CalculateFitParams(width, height);
+            if (!g_displayImage.empty())
+            {
+				double anchorImgX = (newwinW / 2.0 - g_offsetX) / g_scaleFactor;
+				double anchorImgY = (newwinH / 2.0 - g_offsetY) / g_scaleFactor;
+
+				g_offsetX = (int)(newwinW / 2.0 - anchorImgX * g_scaleFactor);
+				g_offsetY = (int)(newwinH / 2.0 - anchorImgY * g_scaleFactor);
+            }
 
             InvalidateRect(hWnd, NULL, TRUE);
         }
-        
+
         return 0;
+    }
+    /*case WM_NCHITTEST:
+    {
+        return HTTRANSPARENT;
+    }*/
     case WM_DESTROY:
+    {
         g_hWndViewer = NULL;
         return 0;
+    }
     default:
+    {
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
-}
 
+    }
+}
 // ---------------------------------------------------------------
 // 초기화 및 뷰어 클래스 등록
 // ---------------------------------------------------------------
 BOOL RegisterViewerClass(HINSTANCE hInstance)
 {
     WNDCLASSEX wc = { 0 };
-	wc.cbSize = sizeof(WNDCLASSEX);
+    wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = ViewerWndProc;
     wc.hInstance = hInstance;
@@ -877,7 +951,7 @@ IMAGECORE_API void TerminateImageCore()
     // C++ Core 자원 해제
     if (g_hWndViewer)
     {
-		DestroyWindow(g_hWndViewer);
+        DestroyWindow(g_hWndViewer);
     }
 }
 
@@ -886,26 +960,26 @@ IMAGECORE_API void TerminateImageCore()
 // ---------------------------------------------------------------
 IMAGECORE_API HWND GetViewerHandle()
 {
-	return g_hWndViewer;
+    return g_hWndViewer;
 }
 
 IMAGECORE_API void SetViewerPosition(int x, int y, int width, int height)
 {
     if (g_hWndViewer == NULL)
-		return;
+        return;
 
-	SetWindowPos(g_hWndViewer, NULL, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-    
+    SetWindowPos(g_hWndViewer, NULL, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+
 }
 
-IMAGECORE_API bool LoadImageFile(const std::string& filePath)
+IMAGECORE_API bool LoadImageFile(const std::string & filePath)
 {
     // std::wstring wPath(filePath);
-	// std::string utf8Path = ConvertWStringToStringUTF8(wPath);
+    // std::string utf8Path = ConvertWStringToStringUTF8(wPath);
 
-	cv::Mat loadedImg = LoadImageByPath(filePath);
-	
-    return ProcessLoadedImage(loadedImg);    
+    cv::Mat loadedImg = LoadImageByPath(filePath);
+
+    return ProcessLoadedImage(loadedImg);
 }
 
 // ---------------------------------------------------------------
@@ -925,6 +999,10 @@ IMAGECORE_API HWND CreateViewer(HWND hParent)
 
     // 1. 부모 창 스타일 및 모서리 강제 설정
     SetWindowLong(hParent, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_THICKFRAME);
+
+    SetWindowPos(hParent, NULL, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
     SetSquareCorners(hParent);
 
     // 2. 부모 창 메시지 가로채기 (Subclassing) ⭐
@@ -943,13 +1021,16 @@ IMAGECORE_API HWND CreateViewer(HWND hParent)
     }
 
     RECT rc; GetClientRect(hParent, &rc);
+
+
     g_hWndViewer = CreateWindowEx(0, VIEWER_CLASS_NAME, NULL, WS_CHILD | WS_VISIBLE,
-        0, TOP_BAR_HEIGHT, rc.right, rc.bottom - TOP_BAR_HEIGHT, hParent, NULL, hInstance, NULL);
+        BORDER_WIDTH, TOP_BAR_HEIGHT, rc.right - (BORDER_WIDTH * 2), rc.bottom - TOP_BAR_HEIGHT - BORDER_WIDTH, hParent, NULL, hInstance, NULL);
 
     if (g_hWndViewer) DragAcceptFiles(g_hWndViewer, TRUE);
 
     return g_hWndViewer;
 }
+
 
 
 BOOL APIENTRY DllMain( HMODULE hModule,
